@@ -2,7 +2,7 @@ name: Vortex Premium 128 Shared Controls
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/build-128-shared-controls.yml', 'patch_v112_catalog_rom.py', 'patch_v113_resolve_builtin_cores.py', 'patch_v114_map_legacy_core_aliases.py', 'patch_v115_drag_clamp_scaling.py', 'patch_v116_snes_safer_default.py', 'patch_v117_raise_control_group.py', 'patch_v118_parallel_install.py']
+    paths: ['.github/workflows/build-128-shared-controls.yml', 'patch_v112_catalog_rom.py', 'patch_v113_resolve_builtin_cores.py', 'patch_v114_map_legacy_core_aliases.py', 'patch_v115_drag_clamp_scaling.py', 'patch_v116_snes_safer_default.py', 'patch_v117_raise_control_group.py', 'patch_v118_parallel_install.py', 'patch_v119_dedicated_controls_layer.py']
   workflow_dispatch:
 permissions:
   contents: write
@@ -86,6 +86,7 @@ jobs:
           python3 ../patch_v116_snes_safer_default.py
           python3 ../patch_v117_raise_control_group.py
           python3 ../patch_v118_parallel_install.py
+          python3 ../patch_v119_dedicated_controls_layer.py
           python3 - <<'PY'
           from pathlib import Path
           p=Path('app/build.gradle'); s=p.read_text().replace('minSdk 21','minSdk 23')
@@ -163,7 +164,7 @@ jobs:
         run: |
           APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
           test -n "$APK"
-          gh release create vortex-128-controls-snes-test-v8 "$APK" --title 'Vortex Premium 128 — correção do carregamento de núcleos' --notes 'Build experimental ARM64 / Android 6+. Build experimental de teste ARM64/Android 6+, com controles elevados durante o arraste e preferência de core SNES bsnes2014 Balanced. App de teste com identificador separado para permitir instalar ao lado de versões anteriores; ROM ainda requer validação no aparelho.'
+          gh release create vortex-128-all-controls-layer-v9 "$APK" --title 'Vortex Premium 128 — correção do carregamento de núcleos' --notes 'Build experimental ARM64 / Android 6+. Build experimental ARM64/Android 6+. Põe todos os controles em camada dedicada acima do vídeo: letras A/B/C/D, especiais redondos, L/R, joystick, START/SELECT e menu. SNES prefere bsnes 2014 Balanced; pacote de teste paralelo.'
       - uses: actions/upload-artifact@v4
         with:
           name: Vortex-Premium-128-Shared-Controls-ARM64
