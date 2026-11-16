@@ -1,0 +1,56 @@
+name: Publish direct APK
+
+on:
+  push:
+    paths:
+      - '.github/workflows/publish-direct-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download existing APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Vortex-Premium-128-Arcade-Fix-ARM64
+          path: apk
+          run-id: 43794906489
+          github-token: ${{ github.token }}
+
+      - name: Verify APK integrity and contents
+        run: |
+          python3 - <<'PY'
+          import hashlib, pathlib, zipfile
+          apk = pathlib.Path('apk/app-arm64-v8a-release.apk')
+          if not apk.is_file():
+              raise SystemExit(f'APK missing: {apk}')
+          with zipfile.ZipFile(apk) as z:
+              bad = z.testzip()
+              if bad:
+                  raise SystemExit(f'Corrupt APK entry: {bad}')
+              names = z.namelist()
+          corepacks = [n for n in names if n.lower().endswith('.zip') and ('corepack' in n.lower() or 'corepacks' in n.lower())]
+          catalogs = [n for n in names if 'catalog' in n.lower()]
+          print(f'APK size: {apk.stat().st_size} bytes')
+          print(f'SHA-256: {hashlib.sha256(apk.read_bytes()).hexdigest()}')
+          print(f'Corepack ZIP assets: {len(corepacks)}')
+          print(f'Catalog entries: {len(catalogs)}')
+          if len(corepacks) < 128:
+              raise SystemExit('Expected at least 128 corepack ZIP assets')
+          if not catalogs:
+              raise SystemExit('Catalog asset not found')
+          PY
+
+      - name: Publish direct APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create vortex-128-arcade-fix
+          apk/app-arm64-v8a-release.apk
+          --title 'Vortex Premium 128 — Arcade'
+          --notes 'APK experimental ARM64, Android 6 ou superior. Não testado em aparelho. Nem todos os cores foram testados. Assinatura temporária.'
