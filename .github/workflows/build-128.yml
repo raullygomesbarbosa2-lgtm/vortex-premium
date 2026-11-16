@@ -6,7 +6,156 @@ on:
     branches: [main]
     paths:
       - 'vortex-premium-source.zip'
+name: Vortex Premium — 128 Libretro cores (ARM64)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'vortex-premium-source.zip'
       - '.github/workflows/build-128.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    defaults:
+      run:
+        working-directory: vortex-premium-source
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      NDK_VERSION: 27.2.12479018
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Extract source archive
+        working-directory: .
+        run: python3 -c "import zipfile; zipfile.ZipFile('vortex-premium-source.zip').extractall('.')"
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Install Android SDK and NDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "ndk;${NDK_VERSION}" "cmake;3.22.1"
+      - name: Generate Android project
+        run: python3 make_apk_project.py
+      - name: Install launcher artwork dependency
+        run: python3 -m pip install --user Pillow
+      - name: Apply Vortix UI, core browser and configurable controls
+        run: |
+          python3 patch_native_project.py
+          python3 patch_retro_systems.py
+          python3 patch_v096.py
+          python3 patch_v097.py
+          python3 patch_vortix_test.py
+          python3 patch_v098.py
+          python3 patch_v099.py
+          python3 patch_v100_official.py
+          python3 patch_v101_chord_macros.py
+          python3 patch_v102_pix_button.py
+          python3 patch_v103_core_browser.py
+          python3 patch_v105_game_controls.py
+          python3 patch_v106_touch_response.py
+          python3 patch_v107_dynamic_specials.py
+          python3 patch_v108_move_controls.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle'); s=p.read_text().replace('minSdk 21','minSdk 23').replace("abiFilters 'armeabi-v7a', 'arm64-v8a'", "abiFilters 'arm64-v8a'")
+          if 'minSdk 23' not in s or "abiFilters 'arm64-v8a'" not in s: raise SystemExit('API 23 / ARM64 setup failed')
+          p.write_text(s)
+          PY
+      - name: Select 128 eligible Libretro core entries and fetch packages
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('app/src/main/assets/core_catalog.json'); c=json.loads(p.read_text())
+          candidates=[x for x in c['cores'] if x.get('catalogType')=='libretro' and x.get('license')]
+          blocked=('non-commercial','noncommercial','non commercial','unknown')
+          candidates=[x for x in candidates if not any(t in x['license'].lower() for t in blocked)]
+          if len(candidates)<128: raise SystemExit(f'Only {len(candidates)} eligible cores; refusing false 128 count.')
+          selected=candidates[:128]
+          if len({x['id'] for x in selected})!=128: raise SystemExit('Duplicate core IDs')
+          p.write_text(json.dumps({**c,'cores':selected},ensure_ascii=False,indent=2)+'\n')
+          q=Path('prepare_core_catalog.py'); s=q.read_text().replace('EXPECTED_TOTAL = 190','EXPECTED_TOTAL = 128').replace('EXPECTED_LIBRETRO = 165','EXPECTED_LIBRETRO = 128').replace('EXPECTED_ENGINE = 25','EXPECTED_ENGINE = 0')
+          q.write_text(s)
+          PY
+          python3 prepare_core_catalog.py
+      - name: Add required notices
+        run: |
+          mkdir -p app/src/main/assets/licenses
+          cp FBNeo-License.txt MAME-Noncommercial-Notice.txt GPL-2.0.txt RUST-DOS-LICENSE.txt CORE-CATALOG-LICENSES.md app/src/main/assets/licenses/
+          curl -fL --retry 3 https://raw.githubusercontent.com/Swordfish90/LibretroDroid/0.13.2/LICENSE -o app/src/main/assets/LibretroDroid-LICENSE.txt
+      - name: Verify all normalized packages
+        run: |
+          python3 - <<'PY'
+          import json,hashlib,struct
+          from pathlib import Path
+          from zipfile import ZipFile
+          a=Path('app/src/main/assets'); cores=json.loads((a/'core_catalog.json').read_text())['cores']
+          if len(cores)!=128 or len({x['id'] for x in cores})!=128 or any(x.get('catalogType')!='libretro' for x in cores): raise SystemExit('Expected 128 unique Libretro entries')
+          for x in cores:
+            with ZipFile(a/x['coreZip']) as z:
+              if z.namelist()!=[x['coreFile']]: raise SystemExit(f'Bad package {x["id"]}')
+              d=z.read(x['coreFile'])
+            if len(d)!=x['coreBytes'] or hashlib.sha256(d).hexdigest()!=x['sha256'] or d[:6]!=b'\x7fELF\x02\x01' or struct.unpack_from('<H',d,18)[0]!=183: raise SystemExit(f'Bad ARM64 core {x["id"]}')
+          print('128 ARM64 Libretro packages verified')
+          PY
+      - name: Configure temporary release signing
+        run: |
+          keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/vortex.jks" -storepass ci-temporary -keypass ci-temporary -alias vortex -dname 'CN=Vortex CI,O=Temporary build,C=BR' -keyalg RSA -keysize 2048 -validity 3650
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle'); s=p.read_text().replace('android {','''android {
+              signingConfigs { ci { storeFile file(System.getenv("CI_KEYSTORE")); storePassword System.getenv("CI_STORE_PASSWORD"); keyAlias System.getenv("CI_KEY_ALIAS"); keyPassword System.getenv("CI_KEY_PASSWORD") } }
+              buildTypes { release { signingConfig signingConfigs.ci; minifyEnabled false } }''',1); p.write_text(s)
+          PY
+          echo "CI_KEYSTORE=$RUNNER_TEMP/vortex.jks" >> "$GITHUB_ENV"
+          echo 'CI_STORE_PASSWORD=ci-temporary' >> "$GITHUB_ENV"
+          echo 'CI_KEY_ALIAS=vortex' >> "$GITHUB_ENV"
+          echo 'CI_KEY_PASSWORD=ci-temporary' >> "$GITHUB_ENV"
+      - name: Build release APK
+        run: gradle assembleRelease --no-daemon
+      - name: Verify APK contains 128 packages
+        run: |
+          python3 - <<'PY'
+          import json,io
+          from pathlib import Path
+          from zipfile import ZipFile
+          apks=list(Path('app/build/outputs/apk/release').glob('*.apk'))
+          if len(apks)!=1: raise SystemExit(f'Expected one APK, got {len(apks)}')
+          apk=apks[0]
+          with ZipFile(apk) as z:
+            names=z.namelist(); packs=[n for n in names if n.startswith('assets/corepacks/') and n.endswith('.zip')]
+            if len(packs)!=128: raise SystemExit(f'{len(packs)} packs, not 128')
+            c=json.loads(z.read('assets/core_catalog.json'))['cores']
+            if len(c)!=128 or any(x.get('catalogType')!='libretro' for x in c): raise SystemExit('bad core catalog')
+            for n in packs:
+              with ZipFile(io.BytesIO(z.read(n))) as core:
+                if len(core.namelist())!=1 or not core.namelist()[0].endswith('.so'): raise SystemExit(f'Invalid {n}')
+          print(f'PASS {apk} ({apk.stat().st_size} bytes), 128 core packages')
+          PY
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vortex-Premium-128-Libretro-ARM64-Android6plus
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 30      - '.github/workflows/build-128.yml'
 
 permissions:
   contents: read
