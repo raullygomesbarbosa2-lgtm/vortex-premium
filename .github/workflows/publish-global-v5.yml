@@ -1,0 +1,23 @@
+name: Publish shared-controls APK v5
+on:
+  push:
+    paths: ['.github/workflows/publish-global-v5.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Vortex-Premium-128-Shared-Controls-ARM64
+          path: apk
+          run-id: 43799604904
+          github-token: ${{ github.token }}
+      - name: Publish direct APK link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create vortex-128-global-controls-v5 apk/app-arm64-v8a-release.apk --title 'Vortex 128 Controles compartilhados' --notes 'Versão experimental Android 6+ ARM64. Não testado em telefone.'
