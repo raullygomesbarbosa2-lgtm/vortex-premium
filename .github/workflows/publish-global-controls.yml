@@ -1,0 +1,61 @@
+name: Publish shared-controls APK directly
+on:
+  push:
+    paths: ['.github/workflows/publish-global-controls.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the verified APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Vortex-Premium-128-Shared-Controls-ARM64
+          path: apk
+          run-id: 43799604904
+          github-token: ${{ github.token }}
+name: Publish Global Controls APK
+on:
+  push:
+    paths: ['.github/workflows/publish-global-controls.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Vortex-Premium-128-Shared-Controls-ARM64
+          path: apk
+          run-id: 43799604904
+          github-token: ${{ github.token }}
+      - name: Publish direct APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create vortex-128-global-controls apk/app-arm64-v8a-release.apk --title 'Vortex Premium 128 Controles Compartilhados' --notes 'Experimental ARM64 Android 6+. Controls profile shared among games. Not tested on a phone. Temporary signing key.'
+      - name: Check APK archive and core count
+        run: |
+          python3 - <<'PY'
+          import json,zipfile
+          from pathlib import Path
+          p=Path('apk/app-arm64-v8a-release.apk')
+          assert p.is_file(), 'APK file missing'
+          with zipfile.ZipFile(p) as z:
+            assert z.testzip() is None, 'APK ZIP archive failed CRC check'
+            packs=[n for n in z.namelist() if n.startswith('assets/corepacks/') and n.endswith('.zip')]
+            count=len(json.loads(z.read('assets/core_catalog.json'))['cores'])
+          assert len(packs)==128 and count==128,(len(packs),count)
+          print('APK integrity OK; 128 core packs; bytes:',p.stat().st_size)
+          PY
+      - name: Publish direct APK link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create vortex-128-global-controls apk/app-arm64-v8a-release.apk --title 'Vortex Premium 128 — Controles compartilhados' --notes 'Versão experimental para ARM64 / Android 6+. Controles e duplas com perfil compartilhado entre jogos. Arraste ainda não validado em aparelho real. Os 128 pacotes foram verificados no build, não testados individualmente. Assinatura temporária.'
