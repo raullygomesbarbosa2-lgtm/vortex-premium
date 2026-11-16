@@ -1,0 +1,41 @@
+name: Publish direct APK
+on:
+  push:
+    paths: ['.github/workflows/publish-apk.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download existing APK
+        uses: actions/download-artifact@v4
+        with:
+          name: Vortex-Premium-128-Arcade-Fix-ARM64
+          path: apk
+          run-id: 43794906489
+          github-token: ${{ github.token }}
+      - name: Verify APK
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,zipfile
+          from pathlib import Path
+          p=Path('apk/app-arm64-v8a-release.apk')
+          assert p.is_file(),f'Missing APK: {p}'
+          with zipfile.ZipFile(p) as z:
+            bad=z.testzip()
+            assert bad is None,f'Corrupt file: {bad}'
+            packs=[n for n in z.namelist() if n.startswith('assets/corepacks/') and n.endswith('.zip')]
+            c=json.loads(z.read('assets/core_catalog.json'))['cores']
+            assert len(packs)==128 and len(c)==128,(len(packs),len(c))
+          h=hashlib.file_digest(p.open('rb'),'sha256').hexdigest()
+          print(f'APK size={p.stat().st_size} bytes; SHA-256={h}; corepacks={len(packs)}')
+          PY
+      - name: Publish direct APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create vortex-128-arcade-fix apk/app-arm64-v8a-release.apk --title 'Vortex Premium 128 — Arcade' --notes 'APK experimental para Android 6 ou superior em ARM64. Não testado em aparelho. Núcleos não testados individualmente. Assinatura temporária.'
