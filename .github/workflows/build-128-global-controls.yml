@@ -1,0 +1,168 @@
+name: Vortex Premium — 128 global controls and drag fix
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/build-128-global-controls.yml']
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      NDK_VERSION: 27.2.12479018
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract source
+        run: python3 -c "import zipfile; zipfile.ZipFile('vortex-premium-source.zip').extractall('.')"
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '8.7'}
+      - name: Install Android SDK
+        run: |
+          S="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          yes | "$S" --sdk_root="$ANDROID_HOME" --licenses
+          "$S" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "ndk;${NDK_VERSION}" "cmake;3.22.1"
+      - name: Generate patched app
+        working-directory: vortex-premium-source
+        run: |
+          python3 make_apk_project.py
+          python3 -m pip install --user Pillow
+          python3 patch_native_project.py
+          python3 patch_retro_systems.py
+          python3 patch_v096.py
+          python3 patch_v097.py
+          python3 patch_vortix_test.py
+          python3 patch_v098.py
+          python3 patch_v099.py
+          python3 patch_v100_official.py
+          python3 patch_v101_chord_macros.py
+          python3 patch_v102_pix_button.py
+          python3 patch_v103_core_browser.py
+          python3 patch_v105_game_controls.py
+          python3 patch_v106_touch_response.py
+          python3 patch_v107_dynamic_specials.py
+          python3 patch_v108_move_controls.py
+          python3 - <<'PY_PATCH'
+          from pathlib import Path
+          p=Path('app/src/main/java/br/com/raully/neohackarcade/MainActivity.java')
+          s=p.read_text(encoding='utf-8')
+          old='''    private String controlsScope() {
+        return currentStateFile == null ? "default" : currentStateFile.getName();
+    }
+'''
+          new='''    private String controlsScope() {
+        // One shared touch layout for all 128 cores, all games, and Arcade.
+        return "all_games";
+    }
+'''
+          if s.count(old)==1: s=s.replace(old,new,1)
+          elif s.count(new)!=1: raise SystemExit('global touch layout scope anchor mismatch')
+          s=s.replace('String game = currentStateFile == null ? "default" : currentStateFile.getName();', 'String game = "all_games";')
+          marker='// VORTEX_GLOBAL_CONTROL_DRAG_FIX'
+          if marker not in s:
+              anchor='''                boolean nested = target.getParent() != gameOverlayRoot;
+                String id = nested ? String.valueOf(target.getTag()) : touchControlIdForView(target);
+'''
+              replacement='''                boolean nested = target.getParent() != gameOverlayRoot;
+                String id = nested ? String.valueOf(target.getTag()) : touchControlIdForView(target);
+                // VORTEX_GLOBAL_CONTROL_DRAG_FIX: don't let GridLayout/LinearLayout clip a dragged button.
+                View direct = target;
+                android.view.ViewParent ancestor = target.getParent();
+                while (ancestor instanceof android.view.ViewGroup && ancestor != gameOverlayRoot) {
+                    android.view.ViewGroup group = (android.view.ViewGroup) ancestor;
+                    group.setClipChildren(false); group.setClipToPadding(false);
+                    if (group.indexOfChild(direct) >= 0) { group.bringChildToFront(direct); group.invalidate(); }
+                    group.setElevation(dp(18));
+                    direct = group; ancestor = group.getParent();
+                }
+                if (direct.getParent() == gameOverlayRoot) { gameOverlayRoot.bringChildToFront(direct); direct.setElevation(dp(18)); }
+                target.bringToFront(); target.setElevation(dp(24));
+'''
+              if s.count(anchor)!=1: raise SystemExit('drag fix anchor mismatch')
+              s=s.replace(anchor,replacement,1)
+          p.write_text(s,encoding='utf-8')
+          print('Applied global all-games controls and unclipped/frontmost drag behavior')
+          PY_PATCH
+          python3 ../patch_v111_arcade_catalog.py/patch_v111_arcade_catalog.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle'); s=p.read_text().replace('minSdk 21','minSdk 23')
+          assert 'minSdk 23' in s and "include 'arm64-v8a'" in s and 'universalApk false' in s
+          p.write_text(s)
+          PY
+      - name: Fetch and validate 128 ARM64 cores
+        working-directory: vortex-premium-source
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request,zipfile,hashlib,struct,io
+          from pathlib import Path
+          a=Path('app/src/main/assets'); c=json.loads((a/'core_catalog.json').read_text())
+          blocked=('non-commercial','noncommercial','non commercial','unknown')
+          cs=[x for x in c['cores'] if x.get('catalogType')=='libretro' and x.get('license') and not any(w in x['license'].lower() for w in blocked)]
+          if len(cs)<128: raise SystemExit(f'Only {len(cs)} eligible cores')
+          cs=cs[:128]
+          if len({x['id'] for x in cs})!=128: raise SystemExit('Duplicate IDs')
+          d=a/'corepacks'; d.mkdir(parents=True,exist_ok=True)
+          for p in d.glob('*.zip'): p.unlink()
+          for i,x in enumerate(cs,1):
+            req=urllib.request.Request(x['sourceArchiveUrl'],headers={'User-Agent':'Vortex-Premium'})
+            with urllib.request.urlopen(req,timeout=180) as r: raw=r.read()
+            with zipfile.ZipFile(io.BytesIO(raw)) as z:
+              if z.testzip(): raise SystemExit(f'Bad ZIP {x["id"]}')
+              ns=[n for n in z.namelist() if n.lower().endswith('.so') and not n.endswith('/')]
+              if len(ns)!=1: raise SystemExit(f'{x["id"]}: expected one .so, got {len(ns)}')
+              member=ns[0]; data=z.read(member)
+            if data[:6]!=b'\x7fELF\x02\x01' or struct.unpack_from('<H',data,18)[0]!=183: raise SystemExit(f'{x["id"]}: wrong ABI')
+            x.update(sourceMember=member,coreFile=Path(member).name,coreBytes=len(data),sha256=hashlib.sha256(data).hexdigest(),sourceArchiveBytes=len(raw),sourceArchiveSha256=hashlib.sha256(raw).hexdigest(),coreZip='corepacks/'+x['id']+'.zip')
+            with zipfile.ZipFile(d/(x['id']+'.zip'),'w',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as z: z.writestr(x['coreFile'],data)
+            print(f'{i}/128 {x["id"]} verified',flush=True)
+          c['cores']=cs; c['catalogPurpose']='128 downloaded ARM64 Libretro libraries verified by ELF and SHA-256'
+          (a/'core_catalog.json').write_text(json.dumps(c,ensure_ascii=False,indent=2)+'\n')
+          PY
+      - name: Add license notices
+        working-directory: vortex-premium-source
+        run: |
+          mkdir -p app/src/main/assets/licenses
+          cp FBNeo-License.txt MAME-Noncommercial-Notice.txt GPL-2.0.txt RUST-DOS-LICENSE.txt CORE-CATALOG-LICENSES.md app/src/main/assets/licenses/
+          curl -fL --retry 3 https://raw.githubusercontent.com/Swordfish90/LibretroDroid/0.13.2/LICENSE -o app/src/main/assets/LibretroDroid-LICENSE.txt
+      - name: Sign release
+        working-directory: vortex-premium-source
+        run: |
+          keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/v.jks" -storepass ci-temp -keypass ci-temp -alias v -dname 'CN=Vortex CI,O=Temporary,C=BR' -keyalg RSA -keysize 2048 -validity 3650
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle'); s=p.read_text().replace('android {','''android {
+              signingConfigs { ci { storeFile file(System.getenv("CI_KEYSTORE")); storePassword System.getenv("CI_STORE_PASSWORD"); keyAlias System.getenv("CI_KEY_ALIAS"); keyPassword System.getenv("CI_KEY_PASSWORD") } }
+              buildTypes { release { signingConfig signingConfigs.ci; minifyEnabled false } }''',1); p.write_text(s)
+          PY
+          echo "CI_KEYSTORE=$RUNNER_TEMP/v.jks" >> "$GITHUB_ENV"
+          echo 'CI_STORE_PASSWORD=ci-temp' >> "$GITHUB_ENV"
+          echo 'CI_KEY_ALIAS=v' >> "$GITHUB_ENV"
+          echo 'CI_KEY_PASSWORD=ci-temp' >> "$GITHUB_ENV"
+      - name: Build and verify APK
+        working-directory: vortex-premium-source
+        run: |
+          gradle assembleRelease --no-daemon
+          python3 - <<'PY'
+          import json,zipfile
+          from pathlib import Path
+          apks=list(Path('app/build/outputs/apk/release').glob('*.apk'))
+          assert len(apks)==1, apks
+          with zipfile.ZipFile(apks[0]) as z:
+            packs=[n for n in z.namelist() if n.startswith('assets/corepacks/') and n.endswith('.zip')]
+            cs=json.loads(z.read('assets/core_catalog.json'))['cores']
+            assert len(packs)==128 and len(cs)==128,(len(packs),len(cs))
+          print('Verified',apks[0],apks[0].stat().st_size,'bytes, 128 cores')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vortex-Premium-128-Global-Controls-ARM64
+          path: vortex-premium-source/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 30
