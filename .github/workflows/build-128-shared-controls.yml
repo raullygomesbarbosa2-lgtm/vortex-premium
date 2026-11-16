@@ -2,7 +2,7 @@ name: Vortex Premium 128 Shared Controls
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/build-128-shared-controls.yml', 'patch_v112_catalog_rom.py', 'patch_v113_resolve_builtin_cores.py']
+    paths: ['.github/workflows/build-128-shared-controls.yml', 'patch_v112_catalog_rom.py', 'patch_v113_resolve_builtin_cores.py', 'patch_v114_map_legacy_core_aliases.py']
   workflow_dispatch:
 permissions:
   contents: write
@@ -81,6 +81,7 @@ jobs:
           python3 ../patch_v111_arcade_catalog.py/patch_v111_arcade_catalog.py
           python3 ../patch_v112_catalog_rom.py
           python3 ../patch_v113_resolve_builtin_cores.py
+          python3 ../patch_v114_map_legacy_core_aliases.py
           python3 - <<'PY'
           from pathlib import Path
           p=Path('app/build.gradle'); s=p.read_text().replace('minSdk 21','minSdk 23')
@@ -158,7 +159,7 @@ jobs:
         run: |
           APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
           test -n "$APK"
-          gh release create vortex-128-rom-launch-fix-v2 "$APK" --title 'Vortex Premium 128 — correção do carregamento de núcleos' --notes 'Build experimental ARM64 / Android 6+. Inclui tratamento de ROM em ZIP e preservação dos arquivos extraídos. Pacotes dos 128 núcleos foram empacotados e verificados; jogos e cores não foram testados individualmente em aparelho.'
+          gh release create vortex-128-rom-launch-fix-v3 "$APK" --title 'Vortex Premium 128 — correção do carregamento de núcleos' --notes 'Build experimental ARM64 / Android 6+. Inclui tratamento de ROM em ZIP e preservação dos arquivos extraídos. Pacotes dos 128 núcleos foram empacotados e verificados; jogos e cores não foram testados individualmente em aparelho.'
       - uses: actions/upload-artifact@v4
         with:
           name: Vortex-Premium-128-Shared-Controls-ARM64
