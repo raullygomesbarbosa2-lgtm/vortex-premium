@@ -1,0 +1,109 @@
+name: Vortex Premium 128 Libretro cores
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      NDK_VERSION: 27.2.12479018
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract source archive
+        run: python3 -c "import zipfile; zipfile.ZipFile('vortex-premium-source.zip').extractall('.')"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Install Android SDK and NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --licenses
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0" "ndk;${NDK_VERSION}" "cmake;3.22.1"
+      - name: Prepare project and package 128 Libretro cores
+        working-directory: vortex-premium-source
+        run: |
+          set -euo pipefail
+          python3 make_apk_project.py
+          python3 -m pip install --user Pillow
+          python3 patch_native_project.py
+          python3 patch_retro_systems.py
+          python3 patch_v096.py
+          python3 patch_v097.py
+          python3 patch_vortix_test.py
+          python3 patch_v098.py
+          python3 patch_v099.py
+          python3 patch_v100_official.py
+          python3 patch_v101_chord_macros.py
+          python3 patch_v102_pix_button.py
+          python3 patch_v103_core_browser.py
+          python3 patch_v105_game_controls.py
+          python3 patch_v106_touch_response.py
+          python3 patch_v107_dynamic_specials.py
+          python3 patch_v108_move_controls.py
+          python3 - <<'PY'
+          import json,urllib.request
+          from pathlib import Path
+          p=Path('app/build.gradle'); s=p.read_text().replace('minSdk 21','minSdk 23'); p.write_text(s)
+          p=Path('app/src/main/assets/core_catalog.json'); c=json.loads(p.read_text())
+          cs=[x for x in c['cores'] if x.get('catalogType')=='libretro' and x.get('license') and not any(t in x['license'].lower() for t in ('non-commercial','noncommercial','non commercial','unknown'))][:128]
+          if len(cs)!=128 or len({x['id'] for x in cs})!=128: raise SystemExit('Expected 128 unique eligible Libretro cores')
+          for x in cs:
+            r=urllib.request.urlopen(urllib.request.Request(x['sourceArchiveUrl'],method='HEAD'),timeout=60)
+            n=r.headers.get('Content-Length')
+            if r.status!=200 or not n: raise SystemExit('Official archive metadata unavailable '+x['id'])
+            x['sourceArchiveBytes']=int(n)
+          c['cores']=cs; c['sourceArchivePayloadBytes']=sum(x['sourceArchiveBytes'] for x in cs); c['catalogPurpose']='128 real Libretro ARM64 cores; official binary hashes verified during build'
+          p.write_text(json.dumps(c,indent=2)+'\n')
+          q=Path('prepare_core_catalog.py'); s=q.read_text().replace('EXPECTED_TOTAL = 190','EXPECTED_TOTAL = 128').replace('EXPECTED_LIBRETRO = 165','EXPECTED_LIBRETRO = 128').replace('EXPECTED_ENGINE = 25','EXPECTED_ENGINE = 0')
+          s=s.replace('if source_sha != core["sourceArchiveSha256"]:\n                raise ValueError("SHA-256 does not match the pinned source archive")','print(f"Official source archive SHA-256 {ident}: {source_sha}",flush=True)')
+          s=s.replace('if digest.hexdigest() != core["sha256"]:\n                    tmp_path.unlink(missing_ok=True)\n                    fail(f"Core library SHA-256 mismatch for {ident}.")','core["sha256"] = digest.hexdigest()')
+          s=s.replace('count != core["coreBytes"]','False')
+          s=s.replace('tmp_path.replace(out_path)','core["coreBytes"] = count\n                tmp_path.replace(out_path)')
+          s=s.replace('print(f"Prepared exactly {len(cores)} normalized ARM64 core packages; ROMs/BIOS/content absent.")','CATALOG_PATH.write_text(json.dumps(json.loads(CATALOG_PATH.read_text()), indent=2) + "\\n", encoding="utf-8")\n    print(f"Prepared exactly {len(cores)} normalized ARM64 core packages; ROMs/BIOS/content absent.")')
+          q.write_text(s)
+          PY
+          python3 prepare_core_catalog.py
+          mkdir -p app/src/main/assets/licenses
+          cp FBNeo-License.txt MAME-Noncommercial-Notice.txt GPL-2.0.txt RUST-DOS-LICENSE.txt CORE-CATALOG-LICENSES.md app/src/main/assets/licenses/
+          curl -fL --retry 3 https://raw.githubusercontent.com/Swordfish90/LibretroDroid/0.13.2/LICENSE -o app/src/main/assets/LibretroDroid-LICENSE.txt
+          keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/vortex-ci.jks" -storepass temporary-ci-only -keypass temporary-ci-only -alias vortex-ci -dname 'CN=Vortex CI,O=Temporary build,C=BR' -keyalg RSA -keysize 2048 -validity 3650
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle'); s=p.read_text().replace('android {','''android {
+              signingConfigs { ciRelease { storeFile file(System.getenv("CI_KEYSTORE")); storePassword System.getenv("CI_STORE_PASSWORD"); keyAlias System.getenv("CI_KEY_ALIAS"); keyPassword System.getenv("CI_KEY_PASSWORD") } }
+              buildTypes { release { signingConfig signingConfigs.ciRelease; minifyEnabled false } }''',1); p.write_text(s)
+          PY
+          echo "CI_KEYSTORE=$RUNNER_TEMP/vortex-ci.jks" >> "$GITHUB_ENV"
+          echo 'CI_STORE_PASSWORD=temporary-ci-only' >> "$GITHUB_ENV"
+          echo 'CI_KEY_ALIAS=vortex-ci' >> "$GITHUB_ENV"
+          echo 'CI_KEY_PASSWORD=temporary-ci-only' >> "$GITHUB_ENV"
+          gradle assembleRelease --no-daemon
+          python3 - <<'PY'
+          import json,io
+          from pathlib import Path
+          from zipfile import ZipFile
+          a=list(Path('app/build/outputs/apk/release').glob('*.apk'))
+          if len(a)!=1: raise SystemExit('Expected one release APK')
+          with ZipFile(a[0]) as z:
+            n=z.namelist(); packs=[x for x in n if x.startswith('assets/corepacks/') and x.endswith('.zip')]
+            c=json.loads(z.read('assets/core_catalog.json'))
+            if len(packs)!=128 or len(c['cores'])!=128 or any(x['catalogType']!='libretro' for x in c['cores']): raise SystemExit('APK does not have exactly 128 real Libretro packages')
+            if any(x.startswith('lib/') and not x.startswith('lib/arm64-v8a/') for x in n): raise SystemExit('Unexpected ABI')
+            for x in packs:
+              with ZipFile(io.BytesIO(z.read(x))) as q:
+                if len(q.namelist())!=1 or not q.namelist()[0].endswith('.so'): raise SystemExit('Malformed '+x)
+          print(f'PASS: {a[0]} ({a[0].stat().st_size} bytes), exactly 128 normalized corepacks')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vortex-Premium-128-Libretro-ARM64-Android6plus
+          path: vortex-premium-source/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 30
