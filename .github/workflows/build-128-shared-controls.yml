@@ -2,7 +2,7 @@ name: Vortex Premium 128 Shared Controls
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/build-128-shared-controls.yml', 'patch_v112_catalog_rom.py', 'patch_v113_resolve_builtin_cores.py', 'patch_v114_map_legacy_core_aliases.py', 'patch_v115_drag_clamp_scaling.py', 'patch_v116_snes_safer_default.py', 'patch_v117_raise_control_group.py', 'patch_v118_parallel_install.py', 'patch_v119_dedicated_controls_layer.py', 'patch_v120_flatten_movable_controls.py']
+    paths: ['.github/workflows/build-128-shared-controls.yml', 'patch_v112_catalog_rom.py', 'patch_v113_resolve_builtin_cores.py', 'patch_v114_map_legacy_core_aliases.py', 'patch_v115_drag_clamp_scaling.py', 'patch_v116_snes_safer_default.py', 'patch_v117_raise_control_group.py', 'patch_v118_parallel_install.py', 'patch_v119_dedicated_controls_layer.py', 'patch_v120_flatten_movable_controls.py', 'patch_v121_exclude_sony_consoles.py']
   workflow_dispatch:
 permissions:
   contents: write
@@ -88,6 +88,7 @@ jobs:
           python3 ../patch_v118_parallel_install.py
           python3 ../patch_v119_dedicated_controls_layer.py
           python3 ../patch_v120_flatten_movable_controls.py
+          python3 ../patch_v121_exclude_sony_consoles.py
           python3 - <<'PY'
           from pathlib import Path
           p=Path('app/build.gradle'); s=p.read_text().replace('minSdk 21','minSdk 23')
@@ -165,7 +166,7 @@ jobs:
         run: |
           APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
           test -n "$APK"
-          gh release create vortex-128-flat-touch-controls-v10 "$APK" --title 'Vortex Premium 128 — correção do carregamento de núcleos' --notes 'Build experimental ARM64 / Android 6+. Build experimental ARM64/Android 6+. Põe cada controle A/B/C/D e especial redondo como filho independente da camada acima do vídeo; L/R continuam na camada frontal. Controles são arrastáveis e guardam posições; inclui os demais ajustes de SNES e instalação paralela de teste. ARM64/Android 6+; requer confirmação no telefone.'
+          gh release create vortex-128-classic-only-no-sony-v11 "$APK" --title 'Vortex Premium 128 — correção do carregamento de núcleos' --notes 'Build experimental ARM64 / Android 6+. Build experimental ARM64/Android 6+. Mantém controles individualizados acima do vídeo, instalação de teste paralela, remove PlayStation, PS2, PSP e PocketStation do catálogo e substitui-os por outros núcleos clássicos disponíveis. ARM64/Android 6+; sem teste em aparelho.'
       - uses: actions/upload-artifact@v4
         with:
           name: Vortex-Premium-128-Shared-Controls-ARM64
