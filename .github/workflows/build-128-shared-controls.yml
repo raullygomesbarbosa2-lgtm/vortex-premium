@@ -2,7 +2,7 @@ name: Vortex Premium 128 Shared Controls
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/build-128-shared-controls.yml', 'patch_v112_catalog_rom.py', 'patch_v113_resolve_builtin_cores.py', 'patch_v114_map_legacy_core_aliases.py', 'patch_v115_drag_clamp_scaling.py', 'patch_v116_snes_safer_default.py']
+    paths: ['.github/workflows/build-128-shared-controls.yml', 'patch_v112_catalog_rom.py', 'patch_v113_resolve_builtin_cores.py', 'patch_v114_map_legacy_core_aliases.py', 'patch_v115_drag_clamp_scaling.py', 'patch_v116_snes_safer_default.py', 'patch_v117_raise_control_group.py']
   workflow_dispatch:
 permissions:
   contents: write
@@ -84,6 +84,7 @@ jobs:
           python3 ../patch_v114_map_legacy_core_aliases.py
           python3 ../patch_v115_drag_clamp_scaling.py
           python3 ../patch_v116_snes_safer_default.py
+          python3 ../patch_v117_raise_control_group.py
           python3 - <<'PY'
           from pathlib import Path
           p=Path('app/build.gradle'); s=p.read_text().replace('minSdk 21','minSdk 23')
@@ -161,7 +162,7 @@ jobs:
         run: |
           APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
           test -n "$APK"
-          gh release create vortex-128-snes-launch-fix-v5 "$APK" --title 'Vortex Premium 128 — correção do carregamento de núcleos' --notes 'Build experimental ARM64 / Android 6+. Mantém os ajustes anteriores de ROM ZIP e controles na tela e altera a preferência do atalho SNES para bsnes 2014 Balanced. Pacotes foram verificados no build; jogos não foram testados em aparelho.'
+          gh release create vortex-128-controls-layer-fix-v6 "$APK" --title 'Vortex Premium 128 — correção do carregamento de núcleos' --notes 'Build experimental ARM64 / Android 6+. Mantém os ajustes de ROM e controles; durante a edição eleva o grupo inteiro de controles acima da imagem do jogo, incluindo botões A/B/C/D e especiais. Build experimental ARM64/Android 6+; sem teste em aparelho.'
       - uses: actions/upload-artifact@v4
         with:
           name: Vortex-Premium-128-Shared-Controls-ARM64
